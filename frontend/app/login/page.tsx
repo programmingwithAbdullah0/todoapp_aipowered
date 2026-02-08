@@ -367,7 +367,7 @@ export default function LoginPage() {
             <Button
               variant="outline"
               onClick={() =>
-                (window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/google`)
+                (window.location.href = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/google`)
               }
               className="w-full h-11 bg-white hover:bg-gray-50 text-slate-700 border-gray-200 hover:border-gray-300 transition-all"
             >
@@ -377,7 +377,7 @@ export default function LoginPage() {
             <Button
               variant="outline"
               onClick={() =>
-                (window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/github`)
+                (window.location.href = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/github`)
               }
               className="w-full h-11 bg-white hover:bg-gray-50 text-slate-700 border-gray-200 hover:border-gray-300 transition-all"
             >
