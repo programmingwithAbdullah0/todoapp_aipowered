@@ -82,12 +82,34 @@ async def update_task(
             task_update = TaskUpdate(**updates)
             updated_task = task_service.update_task(user_id, task.id, task_update, db)
 
-            return {
+            result = {
                 "task_id": updated_task.id,
                 "title": updated_task.title,
                 "description": updated_task.description,
                 "status": "updated",
             }
+            
+            # Notify that a task was updated (this could trigger frontend updates)
+            try:
+                from utils.event_broadcaster import broadcaster
+                import asyncio
+                
+                # Create a task to notify users asynchronously without blocking
+                async def notify_task_updated():
+                    await broadcaster.notify_user(
+                        user_id, 
+                        "task_updated", 
+                        {"task_id": updated_task.id, "title": updated_task.title, "completed": updated_task.completed}
+                    )
+                
+                # Schedule the notification to run without blocking
+                if asyncio.get_event_loop().is_running():
+                    asyncio.create_task(notify_task_updated())
+            except:
+                # If broadcaster is not available, continue without error
+                pass
+            
+            return result
 
     except Exception as e:
         from sqlalchemy.exc import SQLAlchemyError

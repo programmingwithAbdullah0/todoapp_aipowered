@@ -29,7 +29,7 @@ Required variables in `.env`:
 
 - `DATABASE_URL`: Your database connection string (default: sqlite:///./test.db for local development).
 - `SECRET_KEY`: Used for JWT signing.
-- `GEMINI_API_KEY`: For the AI Assistant (Google AI).
+- `OPENROUTER_API_KEY`: For the AI Assistant (OpenRouter API).
 - `FRONTEND_URL`: URL to avoid CORS issues (default: http://localhost:3000).
 - `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`: GitHub OAuth credentials
   - Redirect URI: `http://localhost:8000/api/auth/github/callback`

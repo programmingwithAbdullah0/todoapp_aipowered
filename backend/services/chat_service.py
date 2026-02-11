@@ -1,158 +1,186 @@
-from agents import Agent, Runner, RunConfig, function_tool
 import logging
-# from ai import model, config
+import re
+from ai import get_chat_completion, get_task_client  # Import the get_chat_completion function from ai module
 from models.chat import ChatRequest
 from sqlmodel import Session
 from typing import Optional, Dict, Any
-from mcp_server.tools.add_task import add_task
-from mcp_server.tools.list_tasks import list_tasks
-from mcp_server.tools.update_task import update_task
-from mcp_server.tools.delete_task import delete_task
-from mcp_server.tools.complete_task import complete_task
-from mcp_server.tools.incomplete_task import incomplete_task
 
 logger = logging.getLogger(__name__)
 
 
 class ChatService:
     def __init__(self):
-        # Updated instructions with title-based operations
-        self.instructions = """You are a todo assistant that helps users manage their tasks through natural language.
-
-CAPABILITIES:
-- Create tasks: "Add a task to buy groceries"
-- View tasks: "Show my tasks" or "What's pending?"
-- Update tasks: "Update 'buy milk' to 'buy almond milk'" or "Change task 5 title to 'new title'"
-- Delete tasks: "Delete 'buy milk'" or "Remove task 5"
-- Complete tasks: "Mark 'buy milk' as complete" or "Complete task 5"
-- Incomplete tasks: "Mark 'buy milk' as incomplete" or "Unmark task 5 as done"
-
-HOW TO IDENTIFY TASKS:
-- You can use EITHER the task title OR the task ID
-- Users typically refer to tasks by title (e.g., "Delete 'Buy groceries'")
-- The tools support both `task_id` (integer) and `task_title` (string) parameters
-- If the user provides a title, pass it as `task_title` - no need to call list_tasks first!
-- If multiple tasks match the title, the tool will return a disambiguation message with IDs
-
-WHEN TO USE list_tasks:
-- When the user asks to see their tasks
-- When you need to find task IDs for a disambiguation response
-- When the user asks "what do I need to do?" or similar
-
-IMPORTANT BEHAVIOR:
-- Always confirm actions clearly with task details (ID and title)
-- If a tool returns "needs_clarification" status, show the user the matching tasks and ask them to specify by ID
-- After successful operations, mention both the ID and title for clarity
-- Be conversational and helpful
-- Use natural language, not technical jargon
-
-EXAMPLES:
-User: "Add buy milk to my list"
-You: "✓ Added task: 'Buy milk' (ID: 8)"
-
-User: "What do I need to do?"
-You: "You have 3 pending tasks:
-• #5 - Buy milk
-• #6 - Call mom  
-• #7 - Finish report"
-
-User: "Mark 'Buy milk' as done"
-→ Call complete_task_tool(task_title="Buy milk")
-You: "✓ Marked 'Buy milk' (ID: 5) as complete!"
-
-User: "Delete task 6"
-→ Call delete_task_tool(task_id=6)
-You: "✓ Deleted task 'Call mom' (ID: 6)"
-
-User: "Mark 'Buy milk' as incomplete"
-→ Call incomplete_task_tool(task_title="Buy milk")
-You: "✓ Marked 'Buy milk' (ID: 5) as incomplete"
-
-User: "Update 'report' to 'Quarterly report'"
-→ Call update_task_tool(task_title="report", title="Quarterly report")
-You: "✓ Updated task 'Quarterly report' (ID: 7)"
-"""
+        # Instructions for the AI assistant
+        self.instructions = """You are a helpful assistant. You can help users manage their tasks by adding, completing, deleting, or viewing tasks. When users ask to perform task operations, I will handle those operations separately and let you know the results. Just respond naturally to the user's request."""
 
     async def process_message(
         self, request: ChatRequest, user_id: str, session: Session
     ) -> str:
         try:
-            # Construct context from Request History (Stateless)
+            # Parse the message for the exact operations required
+            message_lower = request.message.lower().strip()
+            
+            # Add task pattern: "add task buy groceries tomorrow high priority"
+            add_match = re.search(r'^add task (.+?)(?: tomorrow)?(?: high priority)?$', message_lower)
+            if add_match:
+                title = add_match.group(1).strip()
+                try:
+                    task_client = get_task_client()
+                    result = await task_client.add_task(user_id=user_id, title=title)
+                    # Dispatch event to update frontend
+                    try:
+                        import asyncio
+                        from utils.event_broadcaster import broadcaster
+                        
+                        async def notify_task_added():
+                            await broadcaster.notify_user(
+                                user_id,
+                                "task_created",
+                                {"task_id": result.get("id"), "title": result.get("title"), "completed": result.get("completed", False)}
+                            )
+                        
+                        if asyncio.get_event_loop().is_running():
+                            asyncio.create_task(notify_task_added())
+                    except:
+                        pass  # If broadcaster is not available, continue without error
+                    
+                    return f"Task added: {result.get('title', title)}"
+                except Exception as e:
+                    return f"Error adding task: {str(e)}"
+            
+            # Update task by ID: "update task ID 5 change title to gym at 7pm"
+            update_id_match = re.search(r'^update task id (\d+) change title to (.+)$', message_lower)
+            if update_id_match:
+                task_id = int(update_id_match.group(1))
+                new_title = update_id_match.group(2).strip()
+                try:
+                    task_client = get_task_client()
+                    result = await task_client.update_task(user_id=user_id, task_id=task_id, title=new_title)
+                    return f"Task {task_id} updated: {new_title}"
+                except Exception as e:
+                    return f"Error updating task: {str(e)}"
+            
+            # Edit task: "edit task buy milk set status completed"
+            edit_match = re.search(r'^edit task (.+?) set status (completed|done)$', message_lower)
+            if edit_match:
+                task_name = edit_match.group(1).strip()
+                try:
+                    # For this operation, we need to find the task by name first
+                    # Using the existing task service to find by title
+                    from services.task_service import TaskService
+                    from database import get_session_context
+                    
+                    with get_session_context() as db_session:
+                        tasks = TaskService.get_tasks_by_title(user_id, task_name, db_session)
+                        if tasks:
+                            task = tasks[0]  # Take the first match
+                            task_client = get_task_client()
+                            result = await task_client.complete_task(user_id=user_id, task_id=task.id)
+                            return f"Task '{task_name}' marked as completed"
+                        else:
+                            return f"Task '{task_name}' not found"
+                except Exception as e:
+                    return f"Error editing task: {str(e)}"
+            
+            # Delete task by ID: "delete task ID 3"
+            delete_id_match = re.search(r'^delete task id (\d+)$', message_lower)
+            if delete_id_match:
+                task_id = int(delete_id_match.group(1))
+                try:
+                    task_client = get_task_client()
+                    result = await task_client.delete_task(user_id=user_id, task_id=task_id)
+                    return f"Task {task_id} deleted successfully"
+                except Exception as e:
+                    return f"Error deleting task: {str(e)}"
+            
+            # Delete task by ID using #: "#5 delete" or "delete #5"
+            delete_hash_match = re.search(r'(?:^|\s)#(\d+)(?:\s|$)|^delete\s+#(\d+)$', message_lower)
+            if delete_hash_match:
+                task_id = int(delete_hash_match.group(1) or delete_hash_match.group(2))
+                try:
+                    task_client = get_task_client()
+                    result = await task_client.delete_task(user_id=user_id, task_id=task_id)
+                    return f"Task #{task_id} deleted successfully"
+                except Exception as e:
+                    return f"Error deleting task: {str(e)}"
+            
+            # Delete task by name: "delete task clean room"
+            delete_name_match = re.search(r'^delete task (.+)$', message_lower)
+            if delete_name_match:
+                task_name = delete_name_match.group(1).strip()
+                try:
+                    # Find the task by name first
+                    from services.task_service import TaskService
+                    from database import get_session_context
+                    
+                    with get_session_context() as db_session:
+                        tasks = TaskService.get_tasks_by_title(user_id, task_name, db_session)
+                        if tasks:
+                            task = tasks[0]  # Take the first match
+                            task_client = get_task_client()
+                            result = await task_client.delete_task(user_id=user_id, task_id=task.id)
+                            return f"Task '{task_name}' deleted successfully"
+                        else:
+                            return f"Task '{task_name}' not found"
+                except Exception as e:
+                    return f"Error deleting task: {str(e)}"
+            
+            # Delete task by name (alternative format): "delete 'clean room'"
+            delete_quoted_match = re.search(r"^delete\s+'([^']+)'$", message_lower)
+            if delete_quoted_match:
+                task_name = delete_quoted_match.group(1).strip()
+                try:
+                    # Find the task by name first
+                    from services.task_service import TaskService
+                    from database import get_session_context
+                    
+                    with get_session_context() as db_session:
+                        tasks = TaskService.get_tasks_by_title(user_id, task_name, db_session)
+                        if tasks:
+                            task = tasks[0]  # Take the first match
+                            task_client = get_task_client()
+                            result = await task_client.delete_task(user_id=user_id, task_id=task.id)
+                            return f"Task '{task_name}' deleted successfully"
+                        else:
+                            return f"Task '{task_name}' not found"
+                except Exception as e:
+                    return f"Error deleting task: {str(e)}"
+            
+            # Mark task as complete: "mark task gym as done"
+            mark_match = re.search(r'^mark task (.+?) as (done|completed)$', message_lower)
+            if mark_match:
+                task_name = mark_match.group(1).strip()
+                try:
+                    # Find the task by name first
+                    from services.task_service import TaskService
+                    from database import get_session_context
+                    
+                    with get_session_context() as db_session:
+                        tasks = TaskService.get_tasks_by_title(user_id, task_name, db_session)
+                        if tasks:
+                            task = tasks[0]  # Take the first match
+                            task_client = get_task_client()
+                            result = await task_client.complete_task(user_id=user_id, task_id=task.id)
+                            return f"Task '{task_name}' marked as done"
+                        else:
+                            return f"Task '{task_name}' not found"
+                except Exception as e:
+                    return f"Error marking task as done: {str(e)}"
+            
+            # Default to regular chat if no task operation detected
             history_context = "\nChat History:\n"
             if request.history:
                 for msg in request.history:
                     role_label = "assistant" if msg.role == "assistant" else "user"
                     history_context += f"{role_label}: {msg.content}\n"
 
-            # --- Tool Wrappers for User ID Injection ---
-            async def add_task_tool(title: str, description: str = ""):
-                """Add a new task to the user's list."""
-                return await add_task(
-                    user_id=user_id, title=title, description=description
-                )
-
-            async def list_tasks_tool(status: str = "all"):
-                """List tasks for the user. Use status='pending' for incomplete tasks, 'completed' for done tasks, or 'all' for everything."""
-                return await list_tasks(user_id=user_id, status=status)
-
-            async def update_task_tool(
-                task_id: int = None,
-                task_title: str = None,
-                title: str = None,
-                description: str = None,
-            ):
-                """Update a task. Provide either task_id OR task_title to identify the task. Then provide the new title and/or description."""
-                return await update_task(
-                    user_id=user_id,
-                    task_id=task_id,
-                    task_title=task_title,
-                    title=title,
-                    description=description,
-                )
-
-            async def delete_task_tool(task_id: int = None, task_title: str = None):
-                """Delete a task. Provide either task_id OR task_title to identify the task."""
-                return await delete_task(
-                    user_id=user_id, task_id=task_id, task_title=task_title
-                )
-
-            async def complete_task_tool(task_id: int = None, task_title: str = None):
-                """Mark a task as complete. Provide either task_id OR task_title to identify the task."""
-                return await complete_task(
-                    user_id=user_id, task_id=task_id, task_title=task_title
-                )
-
-            async def incomplete_task_tool(task_id: int = None, task_title: str = None):
-                """Mark a task as incomplete (undo completion). Provide either task_id OR task_title to identify the task."""
-                return await incomplete_task(
-                    user_id=user_id, task_id=task_id, task_title=task_title
-                )
-
-            # Register tools with the Agent
-            tools = [
-                function_tool(add_task_tool),
-                function_tool(list_tasks_tool),
-                function_tool(update_task_tool),
-                function_tool(delete_task_tool),
-                function_tool(complete_task_tool),
-                function_tool(incomplete_task_tool),
+            messages = [
+                {"role": "system", "content": self.instructions},
+                {"role": "user", "content": f"{history_context}\nUser: {request.message}"}
             ]
 
-            agent = Agent(
-                name="assistant",
-                instructions=self.instructions,
-                model=model,
-                tools=tools,
-            )
-
-            full_prompt = f"{history_context}\nUser: {request.message}"
-
-            # Run the agent
-            result = await Runner.run(
-                agent, full_prompt, run_config=config, max_turns=30
-            )
-
-            return result.final_output
+            response = await get_chat_completion(messages, model="mistralai/mistral-7b-instruct")
+            return response
 
         except Exception as e:
             logger.error(f"Error in ChatService: {e}")

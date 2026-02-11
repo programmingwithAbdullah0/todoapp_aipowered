@@ -53,12 +53,34 @@ async def incomplete_task(
                 user_id, task.id, task_toggle, db
             )
 
-            return {
+            result = {
                 "task_id": updated_task.id,
                 "title": updated_task.title,
                 "completed": updated_task.completed,
                 "status": "incomplete",
             }
+            
+            # Notify that a task was updated (completion status changed)
+            try:
+                from utils.event_broadcaster import broadcaster
+                import asyncio
+                
+                # Create a task to notify users asynchronously without blocking
+                async def notify_task_incompleted():
+                    await broadcaster.notify_user(
+                        user_id, 
+                        "task_updated", 
+                        {"task_id": updated_task.id, "title": updated_task.title, "completed": updated_task.completed}
+                    )
+                
+                # Schedule the notification to run without blocking
+                if asyncio.get_event_loop().is_running():
+                    asyncio.create_task(notify_task_incompleted())
+            except:
+                # If broadcaster is not available, continue without error
+                pass
+            
+            return result
 
     except Exception as e:
         from sqlalchemy.exc import SQLAlchemyError

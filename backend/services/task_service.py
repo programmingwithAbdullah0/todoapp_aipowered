@@ -17,6 +17,10 @@ class TaskService:
         db.add(db_task)
         db.commit()
         db.refresh(db_task)
+        
+        # Trigger a notification that a task was created
+        # Note: Notifications are handled by the caller if needed
+        
         return db_task
 
     @staticmethod
@@ -55,6 +59,7 @@ class TaskService:
         db.add(db_task)
         db.commit()
         db.refresh(db_task)
+        
         return db_task
 
     @staticmethod
@@ -72,4 +77,5 @@ class TaskService:
         db.add(db_task)
         db.commit()
         db.refresh(db_task)
+        
         return db_task

@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     google_client_id: Optional[str] = None
     google_client_secret: Optional[str] = None
     frontend_url: str = "http://localhost:3000"
-    gemini_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
 
 

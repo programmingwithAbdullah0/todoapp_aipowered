@@ -54,12 +54,34 @@ async def add_task(
             task = task_service.create_task(user_id=user_id, task=task_create, db=db)
 
             # Return MCP-compliant response
-            return {
+            result = {
                 "task_id": task.id,
                 "title": task.title,
                 "status": "created",
                 "message": f"Task '{task.title}' created successfully",
             }
+            
+            # Optionally notify that a task was created (this could trigger frontend updates)
+            try:
+                from utils.event_broadcaster import broadcaster
+                import asyncio
+                
+                # Create a task to notify users asynchronously without blocking
+                async def notify_task_created():
+                    await broadcaster.notify_user(
+                        user_id, 
+                        "task_created", 
+                        {"task_id": task.id, "title": task.title, "completed": task.completed}
+                    )
+                
+                # Schedule the notification to run without blocking
+                if asyncio.get_event_loop().is_running():
+                    asyncio.create_task(notify_task_created())
+            except:
+                # If broadcaster is not available, continue without error
+                pass
+            
+            return result
 
     except Exception as e:
         from sqlalchemy.exc import SQLAlchemyError

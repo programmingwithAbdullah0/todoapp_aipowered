@@ -48,7 +48,29 @@ async def delete_task(
             title = task.title
             task_service.delete_task(user_id, task.id, db)
 
-            return {"task_id": task.id, "title": title, "status": "deleted"}
+            result = {"task_id": task.id, "title": title, "status": "deleted"}
+            
+            # Notify that a task was deleted (this could trigger frontend updates)
+            try:
+                from utils.event_broadcaster import broadcaster
+                import asyncio
+                
+                # Create a task to notify users asynchronously without blocking
+                async def notify_task_deleted():
+                    await broadcaster.notify_user(
+                        user_id, 
+                        "task_deleted", 
+                        {"task_id": task.id, "title": title}
+                    )
+                
+                # Schedule the notification to run without blocking
+                if asyncio.get_event_loop().is_running():
+                    asyncio.create_task(notify_task_deleted())
+            except:
+                # If broadcaster is not available, continue without error
+                pass
+            
+            return result
 
     except Exception as e:
         from sqlalchemy.exc import SQLAlchemyError

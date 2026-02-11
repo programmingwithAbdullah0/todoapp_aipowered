@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,19 @@ import time
 from fastapi.exceptions import RequestValidationError
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
+
+# Initialize the event broadcaster
+from utils.event_broadcaster import broadcaster
+
+# # Ensure OPENROUTER_API_KEY is available and also set OPENAI_API_KEY for compatibility with agents library
+if not os.getenv("OPENROUTER_API_KEY"):
+    from dotenv import load_dotenv
+    load_dotenv()
+
+openrouter_key = os.getenv("OPENROUTER_API_KEY")
+if openrouter_key:
+    os.environ["OPENAI_API_KEY"] = openrouter_key  # Set for compatibility with agents library
+    os.environ["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1/"  # Set custom base URL for OpenRouter API
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
