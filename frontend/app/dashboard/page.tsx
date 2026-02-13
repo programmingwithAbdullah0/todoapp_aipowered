@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth";
 import { useTasks } from "@/components/useTasks";
 import { AnimatePresence } from "framer-motion";
 import { Task } from "@/lib/api";
+import { User } from "lucide-react";
 
 export default function DashboardPage() {
   const { user } = useAuth();
